@@ -337,9 +337,9 @@ def main():
 
     # logger for simulation
     simlog = synergia.utils.parallel_utils.Logger(0, 
-            synergia.utils.parallel_utils.LoggerV.INFO_TURN)
+            #synergia.utils.parallel_utils.LoggerV.INFO_TURN)
             #synergia.utils.parallel_utils.LoggerV.INFO)
-            #synergia.utils.parallel_utils.LoggerV.INFO_STEP)
+            synergia.utils.parallel_utils.LoggerV.INFO_STEP)
 
     # if opts.disable_rf:
     #     disable_rfcavities(propagator.get_lattice())
