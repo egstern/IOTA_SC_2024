@@ -93,6 +93,7 @@ def get_iota_twiss(lattice):
 def create_bunch_simulator(refpart, num_particles, real_particles):
     commxx = synergia.utils.Commxx()
     sim = synergia.simulation.Bunch_simulator.create_single_bunch_simulator(
+        #refpart, num_particles, real_particles, commxx)
         refpart, num_particles, real_particles, commxx, 101)
 
     return sim
@@ -141,13 +142,13 @@ def populate_matched_distribution(lattice, bunch, emitx, betax, Dx, emity, betay
     # bunch.checkin_particles()
 
     # populate spectator particles
-    spart = bunch.get_particles_numpy(synergia.bunch.ParticleGroup.spectator)
-    for ixspect in range(51):
-        spart[ixspect, 0:6] = 0.0
-        spart[ixspect, 0] = ixspect * stdx/10
-    for iyspect in range(51,101):
-        spart[iyspect, 0:6] = 0.0
-        spart[iyspect, 2] = (iyspect-50) * stdy/10
+    #spart = bunch.get_particles_numpy(synergia.bunch.ParticleGroup.spectator)
+    #for ixspect in range(51):
+    #    spart[ixspect, 0:6] = 0.0
+    #    spart[ixspect, 0] = ixspect * stdx/10
+    #for iyspect in range(51,101):
+    #    spart[iyspect, 0:6] = 0.0
+    #    spart[iyspect, 2] = (iyspect-50) * stdy/10
 
 
 ################################################################################
@@ -161,7 +162,7 @@ def register_diagnostics(sim):
     diag_bt = synergia.bunch.Diagnostics_bulk_track("tracks.h5", opts.tracks, 0)
     sim.reg_diag_per_turn(diag_bt)
 
-    diag_spect = synergia.bunch.Diagnostics_bulk_track('stracks.h5', 101, 0, synergia.bunch.ParticleGroup.spectator)
+    #diag_spect = synergia.bunch.Diagnostics_bulk_track('stracks.h5', 101, 0, synergia.bunch.ParticleGroup.spectator)
 
     if opts.save_particles and opts.particles_period > 0:
         diag_part = synergia.bunch.Diagnostics_particles("particles.h5")
