@@ -94,7 +94,8 @@ def create_bunch_simulator(refpart, num_particles, real_particles):
     commxx = synergia.utils.Commxx()
     sim = synergia.simulation.Bunch_simulator.create_single_bunch_simulator(
         #refpart, num_particles, real_particles, commxx)
-        refpart, num_particles, real_particles, commxx, 101)
+        #refpart, num_particles, real_particles, commxx, 101)
+        refpart, num_particles, real_particles, commxx, 4)
 
     return sim
 
