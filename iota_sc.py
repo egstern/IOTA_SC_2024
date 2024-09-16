@@ -93,8 +93,8 @@ def get_iota_twiss(lattice):
 def create_bunch_simulator(refpart, num_particles, real_particles):
     commxx = synergia.utils.Commxx()
     sim = synergia.simulation.Bunch_simulator.create_single_bunch_simulator(
-        refpart, num_particles, real_particles, commxx)
-        #refpart, num_particles, real_particles, commxx, 101)
+        #refpart, num_particles, real_particles, commxx)
+        refpart, num_particles, real_particles, commxx, 101)
 
     return sim
 
@@ -142,6 +142,13 @@ def populate_matched_distribution(lattice, bunch, emitx, betax, Dx, emity, betay
     # bunch.checkin_particles()
 
     # populate spectator particles
+    local_num_spect = bunch.get_local_num(synergia.bunch.ParticleGroup.spectator)
+    local_spect = bunch.get_particles_numpy(synergia.bunch.ParticleGroup.spectator)
+    print('loca_spect shape: ', local_spect.shape)
+    # initialize spectator particles
+    local_spect[0:local_num_spect, 0:6] = 0.0
+
+    print('local num spectator: ', local_num_spect)
     #spart = bunch.get_particles_numpy(synergia.bunch.ParticleGroup.spectator)
     #for ixspect in range(51):
     #    spart[ixspect, 0:6] = 0.0
