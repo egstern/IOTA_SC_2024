@@ -12,6 +12,7 @@ PCONST = synergia.foundation.pconstants
 #####################################
 
 from iota_sc_options import opts
+from print_mapping import print_o3
 
 #######################################################
 
@@ -26,12 +27,14 @@ def print_statistics(bunch, fout=sys.stdout):
 
     parts = bunch.get_particles_numpy()
     print(parts.shape,  ", ", parts.size , file=fout)
-    print("shape: {0}, {1}".format(parts.shape[0], parts.shape[1]))
+    print("shape: {0}, {1}".format(parts.shape[0], parts.shape[1]), file=fout)
 
     mean = synergia.bunch.Core_diagnostics.calculate_mean(bunch)
     std = synergia.bunch.Core_diagnostics.calculate_std(bunch, mean)
     print("mean = {}".format(mean), file=fout)
     print("std = {}".format(std), file=fout)
+
+    return mean, std
 
 #######################################################
 #######################################################
@@ -57,12 +60,18 @@ def get_lattice():
     refpart = synergia.foundation.Reference_particle(1, mass, etot)
 
     lattice.set_reference_particle(refpart)
-    # Change the tune of one plane to break the coupling resonance
-    # for elem in lattice.get_elements():
-    #     if elem.get_type() == ET.quadrupole:
-    #         k1 = elem.get_double_attribute('k1')
-    #         elem.set_double_attribute('k1', k1*0.99)
-    #         break
+
+    if opts.split_tunes:
+        print("Splitting the tunes of the horizontal and vertical planes", file=logger)
+        # Change the tunes in different planes to break the coupling resonance
+        for elem in lattice.get_elements():
+            if elem.get_type() == ET.quadrupole:
+                k1 = elem.get_double_attribute('k1')
+                if k1 > 0:
+                    elem.set_double_attribute('k1', k1*(1-opts.split_tunes_factor))
+                else:
+                    elem.set_double_attribute('k1', k1*(1+opts.split_tunes_factor))
+                break
 
     return lattice
 
@@ -93,9 +102,10 @@ def get_iota_twiss(lattice):
 def create_bunch_simulator(refpart, num_particles, real_particles):
     commxx = synergia.utils.Commxx()
     sim = synergia.simulation.Bunch_simulator.create_single_bunch_simulator(
-        #refpart, num_particles, real_particles, commxx)
+        # have to use 0 spectator particles because of sbend bug
+        refpart, num_particles, real_particles, commxx, 0)
         #refpart, num_particles, real_particles, commxx, 101)
-        refpart, num_particles, real_particles, commxx, 4)
+        #refpart, num_particles, real_particles, commxx, 4)
 
     return sim
 
@@ -137,6 +147,12 @@ def populate_matched_distribution(lattice, bunch, emitx, betax, Dx, emity, betay
     limits = np.array([tc, tc, tc, tc, lc, lc])
     synergia.bunch.populate_6d_truncated(dist, bunch, means,
                                          corr_matrix, limits)
+    if opts.monochrome:
+        bunch.checkout_particles()
+        lp = bunch.get_particles_numpy()
+        lp[:, 5] = 0.0
+        bunch.checkin_particles()
+
     # localnum = bunch.get_local_num()
     # lp = bunch.get_particles_numpy()
     # lp[0:localnum, 0:6] = 0.0
@@ -145,11 +161,11 @@ def populate_matched_distribution(lattice, bunch, emitx, betax, Dx, emity, betay
     # populate spectator particles
     local_num_spect = bunch.get_local_num(synergia.bunch.ParticleGroup.spectator)
     local_spect = bunch.get_particles_numpy(synergia.bunch.ParticleGroup.spectator)
-    print('loca_spect shape: ', local_spect.shape)
+    print('loca_spect shape: ', local_spect.shape, file=logger)
     # initialize spectator particles
     local_spect[0:local_num_spect, 0:6] = 0.0
 
-    print('local num spectator: ', local_num_spect)
+    print('local num spectator: ', local_num_spect, file=logger)
     #spart = bunch.get_particles_numpy(synergia.bunch.ParticleGroup.spectator)
     #for ixspect in range(51):
     #    spart[ixspect, 0:6] = 0.0
@@ -159,6 +175,17 @@ def populate_matched_distribution(lattice, bunch, emitx, betax, Dx, emity, betay
     #    spart[iyspect, 2] = (iyspect-50) * stdy/10
 
 
+    return stdx, stdy, stddpop
+
+################################################################################
+
+# set all bunch particle coordinates to 0
+def zero_the_bunch(bunch):
+    num_local = bunch.get_local_num()
+    lp = bunch.get_particles_numpy()
+    lp[:, 0:6] = 0.0
+    bunch.checkin_particles()
+
 ################################################################################
 
 
@@ -167,8 +194,10 @@ def register_diagnostics(sim):
     diag_full2 = synergia.bunch.Diagnostics_full2("diag.h5")
     sim.reg_diag_per_turn(diag_full2)
 
-    diag_bt = synergia.bunch.Diagnostics_bulk_track("tracks.h5", opts.tracks, 0)
-    sim.reg_diag_per_turn(diag_bt)
+    #diag_bt = synergia.bunch.Diagnostics_bulk_track("tracks.h5", 201, 0)
+    if opts.tracks:
+        diag_bt = synergia.bunch.Diagnostics_bulk_track("tracks.h5", opts.tracks, 0)
+        sim.reg_diag_per_turn(diag_bt)
 
     #diag_spect = synergia.bunch.Diagnostics_bulk_track('stracks.h5', 101, 0, synergia.bunch.ParticleGroup.spectator)
 
@@ -193,12 +222,12 @@ def get_propagator(lattice):
 
     steps = opts.steps
 
-    if not opts.collective:
+    if not opts.collective or opts.collective.lower() == "off":
         sc_ops = synergia.collective.Dummy_CO_options()
 
     elif opts.collective == "2d-openhockney":
         sc_ops = synergia.collective.Space_charge_2d_open_hockney_options(opts.gridx, opts.gridy, opts.gridz)
-        sc_opts.comm_group_size = opts.comm_group_size
+        sc_ops.comm_group_size = opts.comm_group_size
         print(f"using 2d-openhockney collective operator with grid size {opts.gridx}, {opts.gridy}, {opts.gridz}", file=logger)
 
     else:
@@ -207,22 +236,23 @@ def get_propagator(lattice):
 
     if opts.stepper == "independent":
         # independent stepper is incompatible with a collective operation
-        if opts.collective:
+        if opts.collective and opts.collective != "off":
             raise RuntimeError("error, may not specify collective operator with independent stepper")
         else:
             stepper = synergia.simulation.Independent_stepper_elements(opts.steps)
             print("using independent stepper elements with steps: ", opts.steps, file=logger)
 
     elif opts.stepper == "elements":
-        if opts.collective:
+        if opts.collective and opts.collective != "off":
             stepper = synergia.simulation.Split_operator_stepper_elements(sc_ops, steps)
+            print("using splitoperator stepper elements with steps: ", steps, file=logger)
 
-        else:
-            stepper = synergia.simulation.Independent_stepper_elements(1)
-
+        elif not opts.collective or opts.collective == "off":
+            stepper = synergia.simulation.Independent_stepper_elements(steps)
+            print("using independent stepper elements with steps: ", steps, file=logger)
     elif opts.stepper == "splitoperator":
         stepper = synergia.simulation.Split_operator_stepper(sc_ops, steps)
-
+        print("using splitoperator stepper with steps: ", steps, file=logger)
 
     # if opts.impedance:
     #     imp_coll_op = get_impedance_op(lattice.get_length())
@@ -244,6 +274,54 @@ def disable_rfcavities(lattice):
             elem.set_double_attribute('volt', 0.0)
 
 
+
+################################################################################
+
+# place test particles, puts in 201 test particles in x, -x, y, -y
+# bunch is the bunch in which to place them
+# std is the array of bunch RMS
+
+def place_test_particles(bunch, stdx, stdy):
+    bunch.checkout_particles()
+    localparts = bunch.get_particles_numpy()
+
+    comm = bunch.get_comm()
+    mpisize = comm.get_size()
+    mpirank = comm.get_rank()
+    totalnum = 201
+    numperrank = totalnum//mpisize
+    overflow = totalnum%mpisize
+    nonoverflow = mpisize-overflow
+    # there will be numperrank except if 201 is not divisible by
+    # the number of ranks
+    
+    dx = stdx/10
+    dy = stdy/10
+    testpart = np.zeros((201, 6))
+    # particle at 0, plus 50 particles at dx
+    testpart[0:51, 0] = dx * np.arange(51.0)/10
+    testpart[51:101, 0] = -dx * np.arange(1.0, 51.0)/10
+    testpart[101:151, 2] = dy * np.arange(1.0, 51.0)/10
+    testpart[151:201, 2] = -dy * np.arange(1.0, 51.0)/10
+
+    # which particles are in my rank?
+    # overflows go to higher ranks
+    if mpirank < mpisize-overflow:
+        # there are numperrank on this rank starting at
+        # numperrank*mpirank
+        tstart = mpirank*numperrank
+        tend = (mpirank+1)*numperrank
+        localparts[:numperrank, 0:6] = testpart[tstart:tend, :]
+    else:
+        # the rest of the ranks get an numperrank+1 particles
+        tstart = nonoverflow*numperrank
+        tstart = tstart + (mpirank-overflow)*(numperrank+1)
+        tend = tstart + numperrank+1
+        localparts[:numperrank+1, 0:6] = testpart[tstart:tend, :]
+
+    bunch.checkin_particles()
+    
+
 ################################################################################
 
 def main():
@@ -253,14 +331,14 @@ def main():
     lattice_length = lattice.get_length()
     bucket_length = lattice_length/opts.harmonic_number
 
-    print('RF cavity frequency should be: ', opts.harmonic_number*lattice.get_reference_particle().get_beta() * PCONST.c/lattice_length)
+    print('RF cavity frequency should be: ', opts.harmonic_number*lattice.get_reference_particle().get_beta() * PCONST.c/lattice_length, file=logger)
 
     # set the aperture early
     set_apertures(lattice)
 
     state = SIM.Lattice_simulator.tune_circular_lattice(lattice)
-    print('state: ', state)
-    print('length maybe: ', state[4]*lattice.get_reference_particle().get_beta())
+    print('state: ', state, file=logger)
+    print('length maybe: ', state[4]*lattice.get_reference_particle().get_beta(), file=logger)
 
     for elem in lattice.get_elements():
         if elem.get_type() == ET.rfcavity:
@@ -289,6 +367,7 @@ def main():
     print(f'disp y: {lf.dispersion.ver}, dprime y: {lf.dPrime.ver}', file=logger)
     
     map = SIM.Lattice_simulator.get_linear_one_turn_map(lattice)
+
     l, v = np.linalg.eig(map)
     print("eigenvalues: ", file=logger)
     for z in l:
@@ -311,39 +390,64 @@ def main():
     bdy = getattr(synergia.bunch.LongitudinalBoundary, opts.longitudinal_boundary)
     bunch_sim.get_bunch().set_longitudinal_boundary(bdy, bucket_length)
     lb, ll = bunch_sim.get_bunch(0,0).get_longitudinal_boundary()
-    print(f'Setting longitudinal boundary conditions: {lb}, size: {ll}')
+    print(f'Setting longitudinal boundary conditions: {lb}, size: {ll}', file=logger)
                                                     
     print('beam current: ', opts.current, ' mA', file=logger)
     print('bunch created with ', opts.macroparticles, ' macroparticles', file=logger)
     print('bunch charge: ', bunch_charge, file=logger)
 
     #### generate bunch
-    populate_matched_distribution(lattice, bunch_sim.get_bunch(0,0),
+    if opts.matching == "6dmoments":
+        stdx, stdy, stddpop = populate_matched_distribution(lattice, bunch_sim.get_bunch(0,0),
                                   opts.emitx, lf.beta.hor, lf.dispersion.hor,
                                   opts.emity, lf.beta.ver,
                                   opts.std_dpop)
 
-    print_statistics(bunch_sim.get_bunch(0, 0), logger)
+        print('generating matched bunch distribution', file=logger)
+        mean, std = print_statistics(bunch_sim.get_bunch(0, 0), logger)
 
+        if opts.test_particles:
+            place_test_particles(bunch_sim.get_bunch(0, 0), stdx, stdy)
+
+    elif opts.matching == "zero":
+        print('bunch particles are all at zero', file=logger)
+        zero_the_bunch(bunch_sim.get_bunch())
+
+    if opts.monochrome:
+        print("Bunch is monochrome, all dp/p set to 0", file=logger)
 
     register_diagnostics(bunch_sim)
 
 
     ####  stepper and collective operators
 
+
     if opts.disable_rf:
         disable_rfcavities(lattice)
+        print("RF cavities disabled", file=logger)
+    else:
+        print("RF cavities active", file=logger)
+
+
+    # print the one turn map for the lattice that will actually by
+    # used for propagation
+    # print("one turn map", file=logger)
+    # map = SIM.Lattice_simulator.get_linear_one_turn_map(lattice)
+    # print(np.array2string(map, max_line_width=200), file=logger)
+    # print(file=logger)
+    print_o3(lattice, ofile=logger)
 
     propagator = get_propagator(lattice)
 
+
     # logger for simulation
     simlog = synergia.utils.parallel_utils.Logger(0, 
-            #synergia.utils.parallel_utils.LoggerV.INFO_TURN)
+            synergia.utils.parallel_utils.LoggerV.INFO_TURN)
             #synergia.utils.parallel_utils.LoggerV.INFO)
-            synergia.utils.parallel_utils.LoggerV.INFO_STEP)
+            #synergia.utils.parallel_utils.LoggerV.INFO_STEP)
 
     # if opts.disable_rf:
-    #     disable_rfcavities(propagator.get_lattice())
+   #     disable_rfcavities(propagator.get_lattice())
 
     propagator.propagate(bunch_sim, simlog, opts.turns)
 
